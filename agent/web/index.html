@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Subscription Watchdog</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #1b1f27; --muted: #667085; --line: #e4e7ec;
+    --accent: #3b5bdb; --alert: #c92a2a; --alert-bg: #fff0f0; --warn: #b45309; --warn-bg: #fff6e5;
+    --ok: #2b8a3e; --ok-bg: #ebfbee; --info-bg: #eef2ff; --mono-bg: #0f172a; --mono: #cbd5e1;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0e1116; --card: #161b22; --text: #e6e9ef; --muted: #8b95a5; --line: #262d38;
+      --accent: #7c93f5; --alert: #ff8787; --alert-bg: #3a1a1c; --warn: #fbbf24; --warn-bg: #3a2c10;
+      --ok: #69db7c; --ok-bg: #12301a; --info-bg: #1c2340; --mono-bg: #0a0d12; --mono: #b6c2d4;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1040px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 22px; margin: 0; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+       margin: 28px 0 10px; font-weight: 600; }
+  .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .bar { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin-top: 16px;
+         padding: 12px 14px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; }
+  .bar label { display: flex; gap: 6px; align-items: center; font-size: 14px; }
+  .bar input[type=date] { font: inherit; padding: 4px 8px; border: 1px solid var(--line);
+         border-radius: 8px; background: var(--bg); color: var(--text); }
+  .spacer { flex: 1; }
+  button { font: inherit; padding: 8px 16px; border-radius: 8px; border: 1px solid var(--line);
+           background: var(--card); color: var(--text); cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button:disabled { opacity: .55; cursor: wait; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 16px; }
+  .tile { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+  .tile b { display: block; font-size: 24px; font-variant-numeric: tabular-nums; }
+  .tile span { color: var(--muted); font-size: 13px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+          padding: 14px 16px; margin-bottom: 10px; }
+  .card.alerted { border-left: 4px solid var(--alert); }
+  .card.reviewed { border-left: 4px solid var(--ok); }
+  .card.skipped, .card.cancelled { border-left: 4px solid var(--line); }
+  .head { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+  .name { font-weight: 650; font-size: 16px; }
+  .meta { color: var(--muted); font-size: 13px; }
+  .badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; font-weight: 600; }
+  .b-alert { background: var(--alert-bg); color: var(--alert); }
+  .b-warn { background: var(--warn-bg); color: var(--warn); }
+  .b-ok { background: var(--ok-bg); color: var(--ok); }
+  .b-info { background: var(--info-bg); color: var(--accent); }
+  .b-mute { background: var(--bg); color: var(--muted); border: 1px solid var(--line); }
+  .facts { display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 10px 0 4px; font-size: 14px; }
+  .facts div span { color: var(--muted); font-size: 12px; display: block; }
+  .facts .bad { color: var(--alert); font-weight: 600; }
+  .reason { margin-top: 8px; padding: 8px 10px; background: var(--bg); border-radius: 8px; font-size: 14px; }
+  .alerts li { margin-bottom: 6px; }
+  ul { list-style: none; padding: 0; margin: 0; }
+  pre { background: var(--mono-bg); color: var(--mono); padding: 12px 14px; border-radius: 12px; overflow-x: auto;
+        font: 12.5px/1.55 ui-monospace, Menlo, Consolas, monospace; max-height: 340px; margin: 0; white-space: pre-wrap; }
+  .empty { color: var(--muted); padding: 18px; text-align: center; }
+  .err { color: var(--alert); margin-top: 8px; font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Subscription Watchdog</h1>
+  <div class="sub" id="modelline"></div>
+
+  <div class="bar">
+    <label>Reference date <input type="date" id="today"></label>
+    <label><input type="checkbox" id="usellm" checked> Use LLM</label>
+    <label><input type="checkbox" id="inbox"> Include inbox emails</label>
+    <span class="spacer"></span>
+    <button id="reset">Reset demo</button>
+    <button class="primary" id="run">Run agent</button>
+  </div>
+  <div class="err" id="error"></div>
+
+  <div class="tiles" id="tiles"></div>
+
+  <h2>Subscriptions</h2>
+  <div id="subs"></div>
+
+  <h2>Alerts sent</h2>
+  <div class="card"><ul class="alerts" id="alerts"></ul></div>
+
+  <h2>Decision log (last run)</h2>
+  <pre id="log">Press "Run agent" to see each step and the reason for every decision.</pre>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const inr = n => "₹" + Number(n).toLocaleString("en-IN", {maximumFractionDigits: 2});
+const REASONS = {price_increase: "price increase", low_usage: "low usage", renewal_soon: "renewal soon"};
+let firstLoad = true;
+
+async function api(path, body) {
+  const opt = body === undefined ? {} : {
+    method: "POST", headers: {"Content-Type": "application/json", "X-Requested-With": "watchdog"},
+    body: JSON.stringify(body)};
+  const r = await fetch(path, opt);
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.error || r.statusText);
+  return data;
+}
+
+function statusOf(s) {
+  if (s.status !== "active") return ["cancelled", '<span class="badge b-mute">Cancelled</span>'];
+  if (!s.gate.length) return ["skipped", '<span class="badge b-mute">Fine, not reviewed</span>'];
+  if (!s.decision) return ["skipped", '<span class="badge b-info">Awaiting review</span>'];
+  if (s.decision.alert) {
+    const sev = s.decision.severity;
+    const cls = sev === "high" ? "b-alert" : sev === "medium" ? "b-warn" : "b-info";
+    return ["alerted", `<span class="badge ${cls}">Alert · ${esc(sev)}</span>`];
+  }
+  return ["reviewed", '<span class="badge b-ok">Reviewed · no action</span>'];
+}
+
+function card(s) {
+  const [cls, badge] = statusOf(s);
+  const hist = s.history.length > 1
+    ? s.history.map(h => inr(h[1])).join(" → ") : inr(s.price);
+  const hike = s.price_change_pct >= 5;
+  const idle = s.days_since_use === null ? "no data" : s.days_since_use + " days";
+  const gate = s.gate.map(g => `<span class="badge b-info">${REASONS[g] || g}</span>`).join(" ");
+  const obv = s.obvious.length ? '<span class="badge b-warn">strict flag</span>' : "";
+  let reason = "";
+  if (s.decision) {
+    const src = s.decision.source === "llm" ? "LLM" : "rule-based fallback";
+    const sent = s.decision.alert ? (s.notified ? " · notification sent" : " · not yet delivered") : "";
+    reason = `<div class="reason">${esc(s.decision.reason)}<div class="meta">decided by ${src}${sent}</div></div>`;
+  }
+  return `<div class="card ${cls}">
+    <div class="head"><span class="name">${esc(s.merchant)}</span>
+      <span class="meta">${esc(s.category)} · ${esc(s.cadence)}</span>${badge} ${gate} ${obv}</div>
+    <div class="facts">
+      <div><span>Price</span>${esc(hist)}</div>
+      <div><span>Change</span><b class="${hike ? "bad" : ""}" style="font-weight:inherit">${s.price_change_pct > 0 ? "+" : ""}${s.price_change_pct}%</b></div>
+      <div><span>Last used</span>${esc(idle)}</div>
+      <div><span>Yearly cost</span>${inr(s.yearly_cost)}</div>
+      <div><span>Next renewal</span>${s.days_to_renewal === null ? "n/a" : "in " + s.days_to_renewal + " days"}</div>
+    </div>${reason}</div>`;
+}
+
+function render(d) {
+  $("modelline").textContent = `Model: ${d.model} · API key ${d.llm_ready ? "found" : "NOT set (rule-based fallback only)"}`;
+  $("tiles").innerHTML = [
+    [d.totals.count, "active subscriptions"],
+    [inr(d.totals.yearly_cost), "total per year"],
+    [d.totals.alerts_sent, "alerts delivered"],
+    [d.subscriptions.filter(s => s.status === "active" && !s.gate.length).length, "fine, no LLM call needed"],
+  ].map(([v, l]) => `<div class="tile"><b>${esc(v)}</b><span>${l}</span></div>`).join("");
+  $("subs").innerHTML = d.subscriptions.length ? d.subscriptions.map(card).join("")
+    : '<div class="card empty">No data yet. Press "Run agent".</div>';
+  $("alerts").innerHTML = d.alerts.length
+    ? d.alerts.map(a => `<li><b>${esc(a.merchant)}</b> <span class="badge b-warn">${esc(a.severity)}</span>
+        <span class="meta">${esc(a.sent_at.replace("T", " "))}</span><br>${esc(a.reason)}</li>`).join("")
+    : '<li class="empty">No alerts sent yet.</li>';
+}
+
+async function refresh() {
+  try {
+    const d = await api("/api/state?today=" + $("today").value);
+    if (firstLoad) { firstLoad = false; }
+    render(d); $("error").textContent = "";
+    return d;
+  } catch (e) { $("error").textContent = e.message; }
+}
+
+$("run").onclick = async () => {
+  const btn = $("run"); btn.disabled = true; btn.textContent = "Running…";
+  $("error").textContent = "";
+  try {
+    const r = await api("/api/run", {today: $("today").value, use_llm: $("usellm").checked, inbox: $("inbox").checked});
+    $("log").textContent = r.log.join("\n");
+    await refresh();
+  } catch (e) { $("error").textContent = e.message; }
+  btn.disabled = false; btn.textContent = "Run agent";
+};
+
+$("reset").onclick = async () => {
+  if (!confirm("Delete the demo database and alert history? The next run will alert again.")) return;
+  try { await api("/api/reset", {}); $("log").textContent = "Demo state cleared."; await refresh(); }
+  catch (e) { $("error").textContent = e.message; }
+};
+
+$("today").onchange = refresh;
+
+(async () => {
+  const d = await api("/api/state");   // server's default reference date
+  $("today").value = d.today;
+  render(d);
+})().catch(e => { $("error").textContent = e.message; });
+</script>
+</body>
+</html>
